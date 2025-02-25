@@ -7,7 +7,7 @@ namespace JesusHack.LiteConfig
         public JesusHackConfig()
         {
             OnlineBlacklist = true;
-            LinkToOnlineBlacklist = "https://github.com/spersoks142/BlackList/blob/main/blacklist.txt";
+            LinkToOnlineBlacklist = "https://raw.githubusercontent.com/spersoks142/BlackList/refs/heads/main/blacklist.txt";
         }
 
         public bool OnlineBlacklist { get; set; }

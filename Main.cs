@@ -4,7 +4,7 @@ using JesusHack.LiteConfig;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(ChillBlacklist.Main), "ChillBlacklist", "1.1.0", "MasterHell", null)]
+[assembly: MelonInfo(typeof(ChillBlacklist.Main), "ChillBlacklist", "1.1.1", "MasterHell", null)]
 [assembly: MelonGame("ZeoWorks", "Slendytubbies 3")]
 [assembly: MelonColor(1, 161, 253, 0)]
 
@@ -47,6 +47,8 @@ namespace ChillBlacklist
         {
             if (!File.Exists(ConfigManager.BlacklistPath))
                 File.Create(ConfigManager.BlacklistPath).Dispose();
+            else
+                _blackList = File.ReadAllLines(ConfigManager.BlacklistPath);
 
             if (_config.OnlineBlacklist)
                 MelonCoroutines.Start(FetchBlacklist());
@@ -56,46 +58,35 @@ namespace ChillBlacklist
         {
             foreach (PhotonPlayer photonPlayer in PhotonNetwork.playerList)
             {
-                if (!CheckPlayer(photonPlayer.name))
-                    continue;
-
-                if (PhotonNetwork.player.IsMasterClient)
+                if (CheckPlayer(photonPlayer.name))
                 {
-                    PhotonNetwork.CloseConnection(photonPlayer);
-                    Kick(photonPlayer.ID);
-                }
+                    PhotonNetwork.DestroyPlayerObjects(photonPlayer);
 
-                SetFakeMasterClient();
-                photonPlayer.actorID = 999;
-                Crash(photonPlayer);
+                    if (PhotonNetwork.player.IsMasterClient)
+                    {
+                        PhotonNetwork.CloseConnection(photonPlayer);
+                        Kick(photonPlayer.ID);
+                    }
+
+                    SetFakeMasterClient();
+                    photonPlayer.actorID = 999;
+                    Crash(photonPlayer);
+                }
             }
         }
 
         private bool CheckPlayer(string playerName)
         {
-            string[] blacklist = GetBlacklist();
-
-            if (blacklist.Length == 0)
+            if (_blackList.Length == 0)
                 return false;
 
-            foreach (string player in blacklist)
+            foreach (string player in _blackList)
             {
-                if (playerName.Split('|')[0].Contains(player))
+                if (playerName.Split('|')[0] == player)
                     return true;
             }
 
             return false;
-        }
-
-        private string[] GetBlacklist()
-        {
-            if (_config.OnlineBlacklist && _blackList != null)
-                return _blackList;
-
-            if (File.Exists(ConfigManager.BlacklistPath))
-                return File.ReadAllLines(ConfigManager.BlacklistPath);
-
-            return [];
         }
 
         private IEnumerator FetchBlacklist()
