@@ -1,2 +1,2 @@
 # ChillBlacklist
-MelonLoader Mod for Slendytubbies 3
+Use MelonLoader 0.7.0
