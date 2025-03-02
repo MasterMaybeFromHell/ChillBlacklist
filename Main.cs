@@ -1,10 +1,10 @@
-﻿using System.Collections;
+﻿using HarmonyLib;
 using Il2Cpp;
 using JesusHack.LiteConfig;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonInfo(typeof(ChillBlacklist.Main), "ChillBlacklist", "1.1.1", "MasterHell", null)]
+[assembly: MelonInfo(typeof(ChillBlacklist.Main), "ChillBlacklist", "1.2.0", "MasterHell", null)]
 [assembly: MelonGame("ZeoWorks", "Slendytubbies 3")]
 [assembly: MelonColor(1, 161, 253, 0)]
 
@@ -12,8 +12,7 @@ namespace ChillBlacklist
 {
     public class Main : MelonMod
     {
-        private string[] _blackList;
-        private bool _isOnMainMenu;
+        public static string BlackList;
         private JesusHackConfig _config;
 
         public override void OnInitializeMelon()
@@ -25,95 +24,66 @@ namespace ChillBlacklist
         public override void OnSceneWasLoaded(int buildIndex, string sceneName)
         {
             if (sceneName == "MainMenu" || sceneName == "Updater")
-            {
-                SetupConfig();
-                _isOnMainMenu = true;
-
-                return;
-            }
-
-            _isOnMainMenu = false;
+                SetupConfigAsync().Wait();
         }
 
-        public override void OnUpdate()
-        {
-            if (_isOnMainMenu)
-                return;
-
-            CheckPlayers();
-        }
-
-        private void SetupConfig()
+        private async Task SetupConfigAsync()
         {
             if (!File.Exists(ConfigManager.BlacklistPath))
                 File.Create(ConfigManager.BlacklistPath).Dispose();
             else
-                _blackList = File.ReadAllLines(ConfigManager.BlacklistPath);
+                BlackList = File.ReadAllText(ConfigManager.BlacklistPath);
 
             if (_config.OnlineBlacklist)
-                MelonCoroutines.Start(FetchBlacklist());
+                BlackList = await DownloadFile(_config.LinkToOnlineBlacklist);
         }
 
-        private void CheckPlayers()
+        private static async Task<string> DownloadFile(string uri)
         {
-            foreach (PhotonPlayer photonPlayer in PhotonNetwork.playerList)
+            using (HttpClient httpClient = new())
             {
-                if (CheckPlayer(photonPlayer.name))
-                {
-                    PhotonNetwork.DestroyPlayerObjects(photonPlayer);
+                HttpResponseMessage httpResponseMessage = await httpClient.GetAsync(uri);
 
-                    if (PhotonNetwork.player.IsMasterClient)
-                    {
-                        PhotonNetwork.CloseConnection(photonPlayer);
-                        Kick(photonPlayer.ID);
-                    }
-
-                    SetFakeMasterClient();
-                    photonPlayer.actorID = 999;
-                    Crash(photonPlayer);
-                }
+                if (httpResponseMessage.IsSuccessStatusCode)
+                    return await httpResponseMessage.Content.ReadAsStringAsync();
             }
+
+            return null;
         }
 
-        private bool CheckPlayer(string playerName)
+        public static bool CheckPlayer(string playerName)
         {
-            if (_blackList.Length == 0)
+            if (string.IsNullOrEmpty(BlackList))
                 return false;
 
-            foreach (string player in _blackList)
+            string[] blackList = BlackList.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (string player in blackList)
             {
-                if (playerName.Split('|')[0] == player)
+                string trimmedPlayer = player.Trim();
+
+                if (trimmedPlayer.Equals(playerName, StringComparison.OrdinalIgnoreCase))
                     return true;
             }
 
             return false;
         }
 
-        private IEnumerator FetchBlacklist()
-        {
-            WWW www = new(_config.LinkToOnlineBlacklist);
-            yield return www;
-
-            if (www.error == null)
-                _blackList = www.text.Split(['\n']);
-        }
-
-        private void Kick(int photonPlayerID)
+        public static void Kick(int photonPlayerID)
         {
             if (!IsPlayerExist(photonPlayerID))
                 return;
 
-            RaiseEventOptions raiseEventOptions = new RaiseEventOptions { TargetActors = new int[] { photonPlayerID } };
+            RaiseEventOptions raiseEventOptions = new() { TargetActors = new int[] { photonPlayerID } };
             PhotonNetwork.networkingPeer.OpRaiseEvent(203, null, true, raiseEventOptions);
 
             Il2CppSystem.Int32 @int = default;
             @int.m_value = photonPlayerID;
             Il2CppSystem.Object eventContent = @int.BoxIl2CppObject();
-
             PhotonNetwork.RaiseEvent(1, eventContent, true, new RaiseEventOptions { Receivers = ReceiverGroup.All });
         }
 
-        private void Crash(PhotonPlayer photonPlayer)
+        public static void Crash(PhotonPlayer photonPlayer)
         {
             if (!IsPlayerExist(photonPlayer))
                 return;
@@ -126,7 +96,7 @@ namespace ChillBlacklist
             photonView?.RPC("BCPFIMDIMJE", photonPlayer, parameters);
         }
 
-        private void SetFakeMasterClient()
+        public static void SetFakeMasterClient()
         {
             if (PhotonNetwork.player.IsMasterClient)
                 return;
@@ -137,7 +107,7 @@ namespace ChillBlacklist
             PhotonNetwork.networkingPeer.mMasterClientId = PhotonNetwork.player.ID;
         }
 
-        private bool IsPlayerExist(PhotonPlayer photonPlayer)
+        public static bool IsPlayerExist(PhotonPlayer photonPlayer)
         {
             foreach (PhotonPlayer player in PhotonNetwork.playerList)
             {
@@ -148,7 +118,7 @@ namespace ChillBlacklist
             return false;
         }
 
-        private bool IsPlayerExist(int photonPlayerID)
+        public static bool IsPlayerExist(int photonPlayerID)
         {
             foreach (PhotonPlayer player in PhotonNetwork.playerList)
             {
@@ -159,10 +129,35 @@ namespace ChillBlacklist
             return false;
         }
 
-        private PhotonView GetPlayer(PhotonPlayer photonPlayer)
+        public static PhotonView GetPlayer(PhotonPlayer photonPlayer)
         {
             GameObject gameObject = GameObject.Find(photonPlayer.name.Split('|')[0]);
             return gameObject?.GetComponent<PhotonView>();
+        }
+    }
+
+    [HarmonyPatch(typeof(WhoKilledWho), "OnPhotonPlayerConnected")]
+    public static class OnPlayerJoined
+    {
+        [HarmonyPrefix]
+        private static void Prefix(ref PhotonPlayer otherPlayer, WhoKilledWho __instance)
+        {
+            string nickName = otherPlayer.name.Split(['|'])[0];
+
+            if (Main.CheckPlayer(nickName) && PhotonNetwork.isMasterClient)
+            {
+                PhotonNetwork.DestroyPlayerObjects(otherPlayer);
+                Main.Kick(otherPlayer.ID);
+                PhotonNetwork.CloseConnection(otherPlayer);
+                Main.Crash(otherPlayer);
+            }
+            else if (Main.CheckPlayer(nickName) && !PhotonNetwork.isMasterClient)
+            {
+                Main.SetFakeMasterClient();
+                PhotonNetwork.DestroyPlayerObjects(otherPlayer);
+                otherPlayer.actorID = 999;
+                Main.Crash(otherPlayer);
+            }
         }
     }
 }
